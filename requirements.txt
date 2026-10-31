@@ -1,0 +1,5 @@
+aiogram==3.13.1
+requests==2.32.3
+pdfplumber==0.11.4
+gdown==5.2.0
+aiohttp
