@@ -1,8 +1,8 @@
 # ============ НАСТРОЙКИ ============
 import os
-from dotenv import load_model  # Если запускаете локально, подтянет файл .env
+from dotenv import load_dotenv  # Если запускаете локально, подтянет файл .env
 
-load_model.load_dotenv()
+load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
