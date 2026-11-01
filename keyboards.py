@@ -44,6 +44,15 @@ def days_keyboard(group: str) -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:zameni")],
     ])
+
+def cabinets_days_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📅 Сегодня", callback_data="cabinets_day:today"),
+            InlineKeyboardButton(text="📅 Завтра", callback_data="cabinets_day:tomorrow"),
+        ],
+        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu:main")],
+    ])
     
 def bug_report_keyboard(group: str, day: str) -> InlineKeyboardMarkup:
     """Кнопка 'Нашли ошибку' для экрана замен."""
