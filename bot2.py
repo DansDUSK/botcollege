@@ -89,7 +89,7 @@ async def about_me(call: CallbackQuery):
         "*Бот создан в учебных целях*, для облегчения просмотра замен 😋\n"
         " Разработчик💻: \n@daggerka\n"
         "Тестировщики📱:\n@nelokhe\n@desoolatee\n\n"
-        "🔗 Исходный код есть на GitHub: [Тык](https://github.com)\n\n"
+        "🔗 Исходный код есть на GitHub: [Тык](https://github.com/DansDUSK/botcollege)\n\n"
         "*Все права защищены.*",
         parse_mode="Markdown",
         reply_markup=back_keybord()
@@ -239,7 +239,7 @@ async def bug_report(call: CallbackQuery):
             ok = download_pdf_by_name(filename, pdf_path)
             if not ok:
                 await call.message.answer(
-                    f"❌ Не удалось скачать оригинал `{filename}` с Яндекс.Диска.",
+                    f"❌ Не удалось скачать оригинал `{filename}`",
                     parse_mode="Markdown"
                 )
                 return
