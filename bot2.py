@@ -12,7 +12,7 @@ from aiohttp import web  # Импортируем веб-сервер
 from config import BOT_TOKEN
 from keyboards import (
     main_menu, courses_keyboard, groups_keyboard, days_keyboard, back_keybord,
-    bug_report_keyboard, bug_report_keyboard_no_group,
+    bug_report_keyboard, bug_report_keyboard_no_group, cabinets_days_keyboard,
 )
 from gdrive import download_pdf_by_name
 from parser import parse_pdf, format_zameni, format_legend
@@ -103,13 +103,21 @@ async def menu_zameni(call: CallbackQuery):
         parse_mode="Markdown",
         reply_markup=courses_keyboard()
     )
-
 @dp.callback_query(F.data == "menu:cabinets")
 async def menu_cabinets(call: CallbackQuery):
     await delete_previous_bug(call)
+    await call.message.edit_text(
+        "📚 *Кабинеты*\nНа какой день показать расписание кабинетов?",
+        parse_mode="Markdown",
+        reply_markup=cabinets_days_keyboard()
+    )
+@dp.callback_query(F.data.startswith("cabinets_day:"))
+async def cabinets_by_day(call: CallbackQuery):
+    _, day = call.data.split(":")
+    await delete_previous_bug(call)
     await call.answer("Загружаю...")
 
-    filename, _, _ = get_filename_and_labels("today")
+    filename, day_label, date_label = get_filename_and_labels(day)
     pdf_path = f"temp_{filename}"
 
     try:
@@ -117,9 +125,10 @@ async def menu_cabinets(call: CallbackQuery):
             ok = download_pdf_by_name(filename, pdf_path)
             if not ok:
                 await call.message.edit_text(
-                    f"❌ Не удалось скачать PDF `{filename}`.",
+                    f"❌ Не удалось скачать PDF `{filename}`.\n"
+                    f"Возможно, замены на этот день ещё не выложили.",
                     parse_mode="Markdown",
-                    reply_markup=back_keybord()
+                    reply_markup=cabinets_days_keyboard()
                 )
                 return
 
@@ -127,21 +136,28 @@ async def menu_cabinets(call: CallbackQuery):
         legend = data.get("__legend__", [])
         text = format_legend(legend)
 
+        # Добавим день и дату в заголовок
+        text = text.replace(
+            "📚 *Расписание кабинетов*",
+            f"📚 *Расписание кабинетов*\n📅 {day_label}, {date_label}",
+            1
+        )
+
         await call.message.edit_text(
             text,
             parse_mode="Markdown",
-            reply_markup=back_keybord()
+            reply_markup=cabinets_days_keyboard()  # оставляем переключатель дней
         )
 
         bug_msg = await call.message.answer(
             "Если не хватает данных о кабинетах — нажмите кнопку ниже.",
-            reply_markup=bug_report_keyboard_no_group("today")
+            reply_markup=bug_report_keyboard_no_group(day)
         )
         last_bug_msg[call.from_user.id] = bug_msg.message_id
         print(f"[bug] сохранили {bug_msg.message_id} для {call.from_user.id}")
 
     except Exception as e:
-        logging.exception("Ошибка в menu_cabinets")
+        logging.exception("Ошибка в cabinets_by_day")
         await call.message.edit_text(f"❌ Ошибка: {e}", reply_markup=back_keybord())
     finally:
         if os.path.exists(pdf_path):
@@ -149,7 +165,7 @@ async def menu_cabinets(call: CallbackQuery):
                 os.remove(pdf_path)
             except Exception:
                 pass
-
+                
 @dp.callback_query(F.data.startswith("course:"))
 async def choose_course(call: CallbackQuery):
     await delete_previous_bug(call)
