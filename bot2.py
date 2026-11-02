@@ -111,6 +111,16 @@ async def menu_cabinets(call: CallbackQuery):
         parse_mode="Markdown",
         reply_markup=cabinets_days_keyboard()
     )
+
+@dp.callback_query(F.data.startswith("course:"))
+async def choose_course(call: CallbackQuery):
+    await delete_previous_bug(call)
+    course = call.data.split(":", 1)[1]
+    await call.message.edit_text(
+        f"📚 *{course}*\nВыбери группу:",
+        parse_mode="Markdown",
+        reply_markup=groups_keyboard(course)
+    )
 @dp.callback_query(F.data.startswith("cabinets_day:"))
 async def cabinets_by_day(call: CallbackQuery):
     _, day = call.data.split(":")
@@ -143,11 +153,19 @@ async def cabinets_by_day(call: CallbackQuery):
             1
         )
 
-        await call.message.edit_text(
-            text,
-            parse_mode="Markdown",
-            reply_markup=cabinets_days_keyboard()  # оставляем переключатель дней
-        )
+        # 👇 Оборачиваем edit_text в try/except
+        try:
+            await call.message.edit_text(
+                text,
+                parse_mode="Markdown",
+                reply_markup=cabinets_days_keyboard()
+            )
+        except Exception as e:
+            if "message is not modified" in str(e):
+                # Всё ок, сообщение уже такое же — просто покажем всплывашку
+                await call.answer("Данные уже актуальны ✅", show_alert=False)
+            else:
+                raise  # другая ошибка — пробрасываем дальше
 
         bug_msg = await call.message.answer(
             "Если не хватает данных о кабинетах — нажмите кнопку ниже.",
@@ -157,24 +175,19 @@ async def cabinets_by_day(call: CallbackQuery):
         print(f"[bug] сохранили {bug_msg.message_id} для {call.from_user.id}")
 
     except Exception as e:
-        logging.exception("Ошибка в cabinets_by_day")
-        await call.message.edit_text(f"❌ Ошибка: {e}", reply_markup=back_keybord())
+        # Ловим только реальные ошибки, не "message is not modified"
+        if "message is not modified" not in str(e):
+            logging.exception("Ошибка в cabinets_by_day")
+            await call.message.edit_text(
+                f"❌ Ошибка: {e}",
+                reply_markup=back_keybord()
+            )
     finally:
         if os.path.exists(pdf_path):
             try:
                 os.remove(pdf_path)
             except Exception:
                 pass
-                
-@dp.callback_query(F.data.startswith("course:"))
-async def choose_course(call: CallbackQuery):
-    await delete_previous_bug(call)
-    course = call.data.split(":", 1)[1]
-    await call.message.edit_text(
-        f"📚 *{course}*\nВыбери группу:",
-        parse_mode="Markdown",
-        reply_markup=groups_keyboard(course)
-    )
 
 @dp.callback_query(F.data.startswith("group:"))
 async def choose_group(call: CallbackQuery):
