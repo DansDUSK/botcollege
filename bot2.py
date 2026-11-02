@@ -87,7 +87,7 @@ async def about_me(call: CallbackQuery):
     await delete_previous_bug(call)
     await call.message.edit_text(
         "*Бот создан в учебных целях*, для облегчения просмотра замен 😋\n"
-        " Разработчик💻: \n@daggerka\n"
+        " Разработчик💻: \n*Скрыт*\n"
         "Тестировщики📱:\n@nelokhe\n@desoolatee\n\n"
         "🔗 Исходный код есть на GitHub: [Тык](https://github.com/DansDUSK/botcollege)\n\n"
         "*Все права защищены.*",
