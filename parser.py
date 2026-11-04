@@ -17,7 +17,15 @@ LEGEND_RE = re.compile(
 
 
 def _clean(s: str) -> str:
-    return re.sub(r"\s+", " ", s).strip(" .")
+    """Убирает лишние пробелы и дубли букв (С С т т -> Ст)."""
+    if not s:
+        return ""
+    s = re.sub(r"\s+", " ", s).strip(" .")
+    # Удаляем дубли: "С С" -> "С", "т т" -> "т"
+    s = re.sub(r"(\b\w)\s+\1\b", r"\1", s)
+    # Удаляем слитные дубли: "СС" -> "С"
+    s = re.sub(r"(\w)\1", r"\1", s)
+    return s.strip(" .")
 
 
 def _split_row(line: str) -> list[str]:
@@ -73,6 +81,7 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
 
         if not line:
             continue
+        
         _extract_legend_from_line(line, legend_lines)
 
         if "─" in line or line.startswith("┌") or line.startswith("└"):
@@ -87,18 +96,22 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
 
         first_cell = cells[0]
 
+        # Пропускаем шапку
         if any(kw in line for kw in ["Замена", "расписанию", "Предмет", "Преподаватель"]):
             continue
         if first_cell in ("No", "гр.", "ур"):
             continue
 
+        # Если нашли новую группу — переключаемся на неё
         if GROUP_NUM_RE.match(first_cell):
             current_group = first_cell
             current_lesson = None
 
+        # Если группы до сих пор нет — пропускаем (значит, это мусор)
         if current_group is None:
             continue
 
+        # Убираем легенду из ячеек
         cleaned_cells = []
         for cell in cells:
             cell_stripped = cell.strip()
@@ -124,6 +137,7 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
         if GALOCHKA_RE.match(old_subj):
             old_subj = ""
 
+        # Начало нового урока
         if LESSON_NUM_RE.match(lesson_cell):
             lesson_num = int(lesson_cell)
             cancelled = bool(CANCELLED_RE.search(new_subj))
@@ -140,6 +154,7 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
             result[current_group].append(current_lesson)
             continue
 
+        # Продолжение предыдущего урока
         if current_lesson is None:
             continue
 
