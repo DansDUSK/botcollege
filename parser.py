@@ -2,68 +2,24 @@ import pdfplumber
 import re
 from collections import defaultdict
 
-
 GROUP_NUM_RE = re.compile(r"^\d{3,4}$")
 LESSON_NUM_RE = re.compile(r"^\d{1,2}$")
-GALOCHKA_RE = re.compile(r"^[√✓vV]+$")
 CANCELLED_RE = re.compile(r"[Уу]рок\s+снят", re.IGNORECASE)
+GALOCHKA_RE = re.compile(r"^[√✓vV]+$")
 
 LEGEND_RE = re.compile(
-    r"("
-    r"[А-ЯЁ][а-яё\-]+\s+[А-ЯЁ]\.\s?[А-ЯЁ]?\.?\s*"
-    r")?"
-    r"\d{2,3}[А-Я]?\s*\([\d,\-\s]+\)"
+    r"([А-ЯЁ][а-яё\-]+\s+[А-ЯЁ]\.\s?[А-ЯЁ]?\.?\s*)?\d{2,3}[А-Я]?\s*\([\d,\-\s]+\)"
 )
 
 
-def _clean(s: str) -> str:
-    """Убирает лишние пробелы и дубли букв (С С т т -> Ст)."""
+def _clean_dup(s: str) -> str:
+    """Убирает дубли букв (С С т т -> Ст) и лишние пробелы."""
     if not s:
         return ""
     s = re.sub(r"\s+", " ", s).strip(" .")
-    # Удаляем дубли: "С С" -> "С", "т т" -> "т"
     s = re.sub(r"(\b\w)\s+\1\b", r"\1", s)
-    # Удаляем слитные дубли: "СС" -> "С"
-    s = re.sub(r"(\w)\1", r"\1", s)
+    s = re.sub(r"([А-ЯЁа-яё])\1", r"\1", s)
     return s.strip(" .")
-
-
-def _split_row(line: str) -> list[str]:
-    parts = line.split("│")
-    if parts and parts[0].strip() == "":
-        parts = parts[1:]
-    if parts and parts[-1].strip() == "":
-        parts = parts[:-1]
-    return [_clean(p) for p in parts]
-
-
-def _merge(old: str, new: str) -> str:
-    if not new or new == "√":
-        return old
-    if not old:
-        return new
-    if new in old:
-        return old
-    if old in new:
-        return new
-    return f"{old}, {new}"
-
-
-def _extract_legend_from_line(line: str, legend_lines: list[str]) -> None:
-    parts = re.split(r"[│┤]", line)
-    for part in parts:
-        part = part.strip()
-        if not part:
-            continue
-        for m in LEGEND_RE.finditer(part):
-            text = m.group(0).strip()
-            if not text:
-                continue
-            if text[0].isdigit() and legend_lines:
-                if text not in legend_lines[-1]:
-                    legend_lines[-1] = f"{legend_lines[-1]}, {text}"
-            elif text not in legend_lines:
-                legend_lines.append(text)
 
 
 def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
@@ -71,104 +27,79 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
     legend_lines: list[str] = []
 
     with pdfplumber.open(pdf_path) as pdf:
-        full_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-
-    current_group: str | None = None
-    current_lesson: dict | None = None
-
-    for raw_line in full_text.split("\n"):
-        line = raw_line.strip()
-
-        if not line:
-            continue
+        page = pdf.pages[0]
         
-        _extract_legend_from_line(line, legend_lines)
-
-        if "─" in line or line.startswith("┌") or line.startswith("└"):
-            continue
-
-        if "│" not in line:
-            continue
-
-        cells = _split_row(line)
-        if len(cells) < 2:
-            continue
-
-        first_cell = cells[0]
-
-        # Пропускаем шапку
-        if any(kw in line for kw in ["Замена", "расписанию", "Предмет", "Преподаватель"]):
-            continue
-        if first_cell in ("No", "гр.", "ур"):
-            continue
-
-        # Если нашли новую группу — переключаемся на неё
-        if GROUP_NUM_RE.match(first_cell):
-            current_group = first_cell
-            current_lesson = None
-
-        # Если группы до сих пор нет — пропускаем (значит, это мусор)
-        if current_group is None:
-            continue
-
-        # Убираем легенду из ячеек
-        cleaned_cells = []
-        for cell in cells:
-            cell_stripped = cell.strip()
-            if cell_stripped and LEGEND_RE.search(cell_stripped):
+        words = page.extract_words(x_tolerance=3, y_tolerance=3)
+        
+        words.sort(key=lambda w: (round(w['top'] / 5) * 5, w['x0']))
+        
+        current_group = None
+        current_lesson = None
+        
+        for w in words:
+            text = w['text']
+            x0 = w['x0']
+            
+            if x0 < 80 and GROUP_NUM_RE.match(text):
+                current_group = text
+                current_lesson = None
                 continue
-            cleaned_cells.append(cell)
-        cells = cleaned_cells
+                
+            if not current_group:
+                continue
 
-        rest = cells[1:]
-        if len(rest) < 1:
-            continue
+            if 80 <= x0 < 110 and LESSON_NUM_RE.match(text):
+                lesson_num = int(text)
+                existing = [l for l in result[current_group] if l['lesson'] == lesson_num]
+                if not existing:
+                    current_lesson = {
+                        "lesson": lesson_num,
+                        "new_subject": "", "new_teacher": "",
+                        "old_subject": "", "old_teacher": "",
+                        "cancelled": False, "unchanged": False
+                    }
+                    result[current_group].append(current_lesson)
+                else:
+                    current_lesson = existing[0]
+                continue
+                
+            if not current_lesson:
+                continue
 
-        lesson_cell = rest[0] if len(rest) > 0 else ""
-        new_subj    = rest[1] if len(rest) > 1 else ""
-        new_aud     = rest[2] if len(rest) > 2 else ""
-        new_teacher = rest[3] if len(rest) > 3 else ""
-        old_subj    = rest[4] if len(rest) > 4 else ""
-        old_aud     = rest[5] if len(rest) > 5 else ""
-        old_teacher = rest[6] if len(rest) > 6 else ""
+            if x0 >= 730:
+                line_words = [w2['text'] for w2 in words if abs(w2['top'] - w['top']) < 5 and w2['x0'] >= 730]
+                line_str = " ".join(line_words).strip()
+                if line_str and line_str not in legend_lines:
+                    legend_lines.append(line_str)
+                continue
+                
+            if 110 <= x0 < 250:
+                if CANCELLED_RE.search(text):
+                    current_lesson["cancelled"] = True
+                elif not GALOCHKA_RE.match(text):
+                    current_lesson["new_subject"] += " " + text
+            elif 250 <= x0 < 400:
+                current_lesson["new_teacher"] += " " + text
+            elif 400 <= x0 < 550:
+                current_lesson["old_subject"] += " " + text
+            elif 550 <= x0 < 730:
+                current_lesson["old_teacher"] += " " + text
+                
+        for group, lessons in result.items():
+            for l in lessons:
+                l["new_subject"] = _clean_dup(l["new_subject"])
+                l["new_teacher"] = _clean_dup(l["new_teacher"])
+                l["old_subject"] = _clean_dup(l["old_subject"])
+                l["old_teacher"] = _clean_dup(l["old_teacher"])
 
-        if GALOCHKA_RE.match(new_subj):
-            new_subj = ""
-        if GALOCHKA_RE.match(old_subj):
-            old_subj = ""
+    cleaned_legend = []
+    for line in legend_lines:
+        line = _clean_dup(line)
+        if line and line not in cleaned_legend:
+            cleaned_legend.append(line)
 
-        # Начало нового урока
-        if LESSON_NUM_RE.match(lesson_cell):
-            lesson_num = int(lesson_cell)
-            cancelled = bool(CANCELLED_RE.search(new_subj))
-
-            current_lesson = {
-                "lesson": lesson_num,
-                "new_subject": new_subj if not cancelled else "",
-                "new_teacher": new_teacher if not cancelled else "",
-                "old_subject": old_subj,
-                "old_teacher": old_teacher,
-                "cancelled": cancelled,
-                "unchanged": False,
-            }
-            result[current_group].append(current_lesson)
-            continue
-
-        # Продолжение предыдущего урока
-        if current_lesson is None:
-            continue
-
-        if GALOCHKA_RE.match(new_subj) and not current_lesson["cancelled"]:
-            current_lesson["unchanged"] = True
-
-        current_lesson["new_subject"] = _merge(current_lesson["new_subject"], new_subj)
-        current_lesson["new_teacher"] = _merge(current_lesson["new_teacher"], new_teacher)
-        current_lesson["old_subject"] = _merge(current_lesson["old_subject"], old_subj)
-        current_lesson["old_teacher"] = _merge(current_lesson["old_teacher"], old_teacher)
-
-    result["__legend__"] = legend_lines
+    result["__legend__"] = cleaned_legend
     return dict(result)
-
 
 def format_zameni(group: str, zameni: list[dict], day_label: str, date_label: str) -> str:
     if not zameni:
