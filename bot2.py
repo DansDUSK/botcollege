@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timedelta
-
+import time
 from aiogram import Bot, Dispatcher, F
 from aiogram.utils.callback_answer import CallbackAnswerMiddleware
 from aiogram.filters import CommandStart
@@ -21,6 +21,8 @@ logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+pdf_cache: dict[str, tuple[dict, float]] = {}
+CACHE_TTL = 3 * 60 * 60
 
 dp.callback_query.middleware(CallbackAnswerMiddleware())
 
@@ -127,29 +129,32 @@ async def cabinets_by_day(call: CallbackQuery):
     pdf_path = f"temp_{filename}"
 
     try:
-        if not os.path.exists(pdf_path):
-            ok = download_pdf_by_name(filename, pdf_path)
-            if not ok:
-                await call.message.edit_text(
-                    f"❌ Не удалось скачать PDF `{filename}`.\n"
-                    f"Возможно, замены на этот день ещё не выложили.",
-                    parse_mode="Markdown",
-                    reply_markup=cabinets_days_keyboard()
-                )
-                return
+        # Проверяем кэш
+        now = time.time()
+        cached = pdf_cache.get(filename)
+        if cached and (now - cached[1]) < CACHE_TTL:
+            data = cached[0]
+        else:
+            if not os.path.exists(pdf_path):
+                ok = download_pdf_by_name(filename, pdf_path)
+                if not ok:
+                    await call.message.edit_text(
+                        f"❌ Не удалось скачать PDF `{filename}`.",
+                        parse_mode="Markdown",
+                        reply_markup=cabinets_days_keyboard()
+                    )
+                    return
+            data = parse_pdf(pdf_path)
+            pdf_cache[filename] = (data, now)
 
-        data = parse_pdf(pdf_path)
         legend = data.get("__legend__", [])
         text = format_legend(legend)
-
-        # Добавим день и дату в заголовок
         text = text.replace(
             "📚 *Расписание кабинетов*",
             f"📚 *Расписание кабинетов*\n📅 {day_label}, {date_label}",
             1
         )
 
-        # 👇 Оборачиваем edit_text в try/except
         try:
             await call.message.edit_text(
                 text,
@@ -158,26 +163,20 @@ async def cabinets_by_day(call: CallbackQuery):
             )
         except Exception as e:
             if "message is not modified" in str(e):
-                # Всё ок, сообщение уже такое же — просто покажем всплывашку
-                await call.answer("Данные уже актуальны ✅", show_alert=False)
+                await call.answer("Данные уже актуальны ✅")
             else:
-                raise  # другая ошибка — пробрасываем дальше
+                raise
 
         bug_msg = await call.message.answer(
             "Если не хватает данных о кабинетах — нажмите кнопку ниже.",
             reply_markup=bug_report_keyboard_no_group(day)
         )
         last_bug_msg[call.from_user.id] = bug_msg.message_id
-        print(f"[bug] сохранили {bug_msg.message_id} для {call.from_user.id}")
 
     except Exception as e:
-        # Ловим только реальные ошибки, не "message is not modified"
+        logging.exception("Ошибка в cabinets_by_day")
         if "message is not modified" not in str(e):
-            logging.exception("Ошибка в cabinets_by_day")
-            await call.message.edit_text(
-                f"❌ Ошибка: {e}",
-                reply_markup=back_keybord()
-            )
+            await call.message.edit_text(f"❌ Ошибка: {e}", reply_markup=back_keybord())
     finally:
         if os.path.exists(pdf_path):
             try:
@@ -209,19 +208,44 @@ async def send_zameni(call: CallbackQuery):
     pdf_path = f"temp_{filename}"
 
     try:
-        if not os.path.exists(pdf_path):
-            ok = download_pdf_by_name(filename, pdf_path)
-            if not ok:
-                await call.message.edit_text(
-                    f"❌ Не удалось скачать PDF `{filename}`.\n"
-                    f"Возможно, замены на этот день ещё не выложили.",
-                    parse_mode="Markdown",
-                    reply_markup=back_keybord()
-                )
-                return
+        # Проверяем кэш
+        now = time.time()
+        cached = pdf_cache.get(filename)
+        if cached and (now - cached[1]) < CACHE_TTL:
+            data = cached[0]
+            print(f"[cache] Используем кэш для {filename}")
+        else:
+            # Скачиваем и парсим
+            if not os.path.exists(pdf_path):
+                ok = download_pdf_by_name(filename, pdf_path)
+                if not ok:
+                    await call.message.edit_text(
+                        f"❌ Не удалось скачать PDF `{filename}`.\n"
+                        f"Возможно, замены на этот день ещё не выложили.",
+                        parse_mode="Markdown",
+                        reply_markup=main_menu()
+                    )
+                    return
 
-        data = parse_pdf(pdf_path)
+            data = parse_pdf(pdf_path)
+            pdf_cache[filename] = (data, now)
+            print(f"[cache] Обновили кэш для {filename}")
+
         zameni = data.get(group, [])
+        
+        # Если для группы нет данных — отправляем оригинал PDF
+        if not zameni:
+            if not os.path.exists(pdf_path):
+                download_pdf_by_name(filename, pdf_path)
+            doc = FSInputFile(pdf_path, filename=filename)
+            await call.message.edit_text(
+                f"⚠️ Не удалось автоматически распознать замены для группы *{group}*.\n"
+                f"Вот оригинальный файл — посмотрите замены вручную.",
+                parse_mode="Markdown"
+            )
+            await call.message.answer_document(doc)
+            return
+        
         text = format_zameni(group, zameni, day_label, date_label)
 
         await call.message.edit_text(
@@ -232,16 +256,15 @@ async def send_zameni(call: CallbackQuery):
 
         bug_msg = await call.message.answer(
             f"Если заметили ошибку или не хватает данных для группы *{group}* — "
-            f"нажмите кнопку ниже.(Бот находится в режиме разработки, возможны ошибки в заменах, оригинальный pdf файл ниже!)",
+            f"нажмите кнопку ниже.",
             parse_mode="Markdown",
             reply_markup=bug_report_keyboard(group, day)
         )
         last_bug_msg[call.from_user.id] = bug_msg.message_id
-        print(f"[bug] сохранили {bug_msg.message_id} для {call.from_user.id}")
 
     except Exception as e:
         logging.exception("Ошибка в send_zameni")
-        await call.message.edit_text(f"❌ Ошибка: {e}", reply_markup=back_keybord())
+        await call.message.edit_text(f"❌ Ошибка: {e}", reply_markup=main_menu())
     finally:
         if os.path.exists(pdf_path):
             try:
