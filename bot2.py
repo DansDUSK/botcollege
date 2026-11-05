@@ -26,19 +26,15 @@ dp.callback_query.middleware(CallbackAnswerMiddleware())
 
 last_bug_msg: dict[int, int] = {}
 
-# --- ДОБАВЛЕННЫЙ ВЕБ-СЕРВЕР ДЛЯ ОБХОДА "СНА" ---
 async def handle_ping(request):
-    """Отдает HTTP-ответ, чтобы Render видел, что приложение живо."""
     return web.Response(text="Бот замен активен и работает!")
 
 async def start_web_server():
-    """Запуск фонового веб-сервера на порту, который выделит Render."""
     app = web.Application()
     app.router.add_get("/", handle_ping)
     runner = web.AppRunner(app)
     await runner.setup()
     
-    # Render автоматически передает нужный порт в переменную PORT
     port = int(os.getenv("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
@@ -236,7 +232,7 @@ async def send_zameni(call: CallbackQuery):
 
         bug_msg = await call.message.answer(
             f"Если заметили ошибку или не хватает данных для группы *{group}* — "
-            f"нажмите кнопку ниже.",
+            f"нажмите кнопку ниже.(Бот находится в режиме разработки, возможны ошибки в заменах, оригинальный pdf файл ниже!)",
             parse_mode="Markdown",
             reply_markup=bug_report_keyboard(group, day)
         )
