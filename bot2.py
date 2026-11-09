@@ -84,7 +84,8 @@ async def back_main(call: CallbackQuery):
 async def about_me(call: CallbackQuery):
     await delete_previous_bug(call)
     await call.message.edit_text(
-        "*Бот создан в учебных целях*, для облегчения просмотра замен 😋\n"
+        "*Бот создан в учебных целях*, для облегчения просмотра замен 😋\n",
+        "На данный момент бот все также разрабатывается (убираются ошибки с распознованием замен) - *спасибо за понимание!*"
         " Разработчик💻: \n*Скрыт*\n"
         "Тестировщики📱:\n@nelokhe\n@desoolatee\n\n"
         "🔗 Исходный код есть на GitHub: [Тык](https://github.com/DansDUSK/botcollege)\n\n"
@@ -239,10 +240,10 @@ async def send_zameni(call: CallbackQuery):
                 download_pdf_by_name(filename, pdf_path)
             doc = FSInputFile(pdf_path, filename=filename)
             await call.message.edit_text(
-                f"⚠️ Не удалось автоматически распознать замены для группы *{group}*.\n"
-                f"Вот оригинальный файл — посмотрите замены вручную.",
+                f"😊 На завтра замен у группы *{group}* нету.\n",
                 parse_mode="Markdown"
             )
+            await call.message.answer("Если заметили ошибки или недостающие данные, ниже оригинальный файл замен! (Возможны ошибки в автоматическом распозновании)\n")
             await call.message.answer_document(doc)
             return
         
