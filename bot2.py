@@ -241,7 +241,7 @@ async def send_zameni(call: CallbackQuery):
             doc = FSInputFile(pdf_path, filename=filename)
             await call.message.edit_text(
                 f"😊 На завтра замен у группы *{group}* нету.\n",
-                parse_mode="Markdown"
+                parse_mode="Markdown", reply_markup=back_keybord()
             )
             await call.message.answer("Если заметили ошибки или недостающие данные, ниже оригинальный файл замен! (Возможны ошибки в автоматическом распозновании)\n")
             await call.message.answer_document(doc)
