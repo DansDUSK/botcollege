@@ -84,7 +84,7 @@ async def back_main(call: CallbackQuery):
 async def about_me(call: CallbackQuery):
     await delete_previous_bug(call)
     await call.message.edit_text(
-        "*Бот создан в учебных целях*, для облегчения просмотра замен 😋\n",
+        "*Бот создан в учебных целях*, для облегчения просмотра замен 😋\n"
         "На данный момент бот все также разрабатывается (убираются ошибки с распознованием замен) - *спасибо за понимание!*"
         " Разработчик💻: \n*Скрыт*\n"
         "Тестировщики📱:\n@nelokhe\n@desoolatee\n\n"
