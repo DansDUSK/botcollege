@@ -6,7 +6,6 @@ def main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📅 Замены", callback_data="menu:zameni")],
         [InlineKeyboardButton(text="📚 Кабинеты", callback_data="menu:cabinets")],
-        [InlineKeyboardButton(text="🔔 Уведомления", callback_data="menu:notifications")],
         [InlineKeyboardButton(text="👾 О нас", callback_data="about_me")]
     ])
 
