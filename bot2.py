@@ -3,45 +3,97 @@ import logging
 import os
 from datetime import datetime, timedelta
 import time
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.utils.callback_answer import CallbackAnswerMiddleware
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery, FSInputFile
-from aiohttp import web  # Импортируем веб-сервер
+from aiohttp import web
 
 from config import BOT_TOKEN
 from keyboards import (
     main_menu, courses_keyboard, groups_keyboard, days_keyboard, back_keybord,
     bug_report_keyboard, bug_report_keyboard_no_group, cabinets_days_keyboard,
 )
-from gdrive import download_pdf_by_name
+from gdrive import download_pdf_by_name, list_files_in_folder, GDRIVE_FOLDER_ID
 from parser import parse_pdf, format_zameni, format_legend
+from database import (
+    init_db, add_user, get_users_for_notification, get_last_notified, set_last_notified
+)
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+
+# Кэш для PDF
 pdf_cache: dict[str, tuple[dict, float]] = {}
-CACHE_TTL = 3 * 60 * 60
+CACHE_TTL = 3 * 60 * 60  # 3 часа
 
 dp.callback_query.middleware(CallbackAnswerMiddleware())
 
 last_bug_msg: dict[int, int] = {}
 
-async def handle_ping(request):
+# --- Проверка уведомлений ---
+async def check_and_notify():
+    """Проверяет новые файлы на Google Drive и рассылает уведомления."""
+    try:
+        files = list_files_in_folder(GDRIVE_FOLDER_ID)
+        if not files:
+            print("[notify] Список файлов пуст")
+            return
+
+        tomorrow = (datetime.now() + timedelta(days=1)).strftime("%d.%m.%Y") + ".pdf"
+        print(f"[notify] Ищем файл: {tomorrow}")
+
+        found = any(f.get("path") == tomorrow for f in files)
+        if not found:
+            print(f"[notify] Файл {tomorrow} ещё не выложен")
+            return
+
+        users = get_users_for_notification()
+        print(f"[notify] Файл найден! Рассылаем {len(users)} пользователям")
+
+        for user_id in users:
+            last = get_last_notified(user_id)
+            if last != tomorrow:
+                try:
+                    await bot.send_message(
+                        user_id,
+                        f"🔔 *Новые замены!*\n\n"
+                        f"На завтра ({tomorrow}) выложили замены.\n"
+                        f"Загляни в бота, чтобы посмотреть.",
+                        parse_mode="Markdown"
+                    )
+                    set_last_notified(user_id, tomorrow)
+                    print(f"[notify] Отправлено {user_id}")
+                except Exception as e:
+                    print(f"[notify] Ошибка для {user_id}: {e}")
+    except Exception as e:
+        print(f"[notify] Ошибка проверки: {e}")
+
+# --- Веб-сервер для Render ---
+async def handle_health(request):
+    """Эндпоинт для cron-job.org."""
+    asyncio.create_task(check_and_notify())  # Запускаем проверку в фоне
+    return web.Response(text="OK")
+
+async def handle_root(request):
     return web.Response(text="Бот замен активен и работает!")
 
 async def start_web_server():
     app = web.Application()
-    app.router.add_get("/", handle_ping)
+    app.router.add_get("/health", handle_health)
+    app.router.add_get("/", handle_root)
     runner = web.AppRunner(app)
     await runner.setup()
     
     port = int(os.getenv("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"[Render] Веб-сервер успешно запущен на порту {port}")
-# -----------------------------------------------
+    print(f"[Render] Веб-сервер запущен на порту {port}")
+
+# --- Хендлеры ---
 
 async def delete_previous_bug(call: CallbackQuery) -> None:
     user_id = call.from_user.id
@@ -67,6 +119,7 @@ def get_filename_and_labels(day: str) -> tuple[str, str, str]:
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
+    add_user(message.from_user.id)  # Регистрируем пользователя
     await message.answer(
         "👋 Привет! \nЯ твой бот для просмотра замен🚀\nВыбери, что тебе нужно:",
         reply_markup=main_menu()
@@ -85,14 +138,21 @@ async def about_me(call: CallbackQuery):
     await delete_previous_bug(call)
     await call.message.edit_text(
         "*Бот создан в учебных целях*, для облегчения просмотра замен 😋\n"
-        "На данный момент бот все также разрабатывается (убираются ошибки с распознованием замен) - *спасибо за понимание!*"
-        " Разработчик💻: \n*Скрыт*\n"
+        "На данный момент бот все также разрабатывается (убираются ошибки с распознованием замен) - *спасибо за понимание!*\n"
+        "Разработчик💻: \n*Скрыт*\n"
         "Тестировщики📱:\n@nelokhe\n@desoolatee\n\n"
         "🔗 Исходный код есть на GitHub: [Тык](https://github.com/DansDUSK/botcollege)\n\n"
         "*Все права защищены.*",
         parse_mode="Markdown",
         reply_markup=back_keybord()
     )
+
+@dp.callback_query(F.data == "menu:notifications")
+async def toggle_notif(call: CallbackQuery):
+    from database import toggle_notifications
+    new_state = toggle_notifications(call.from_user.id)
+    status = "включены" if new_state else "выключены"
+    await call.answer(f"Уведомления {status}", show_alert=True)
 
 @dp.callback_query(F.data == "menu:zameni")
 async def menu_zameni(call: CallbackQuery):
@@ -102,6 +162,7 @@ async def menu_zameni(call: CallbackQuery):
         parse_mode="Markdown",
         reply_markup=courses_keyboard()
     )
+
 @dp.callback_query(F.data == "menu:cabinets")
 async def menu_cabinets(call: CallbackQuery):
     await delete_previous_bug(call)
@@ -120,6 +181,7 @@ async def choose_course(call: CallbackQuery):
         parse_mode="Markdown",
         reply_markup=groups_keyboard(course)
     )
+
 @dp.callback_query(F.data.startswith("cabinets_day:"))
 async def cabinets_by_day(call: CallbackQuery):
     _, day = call.data.split(":")
@@ -130,7 +192,6 @@ async def cabinets_by_day(call: CallbackQuery):
     pdf_path = f"temp_{filename}"
 
     try:
-        # Проверяем кэш
         now = time.time()
         cached = pdf_cache.get(filename)
         if cached and (now - cached[1]) < CACHE_TTL:
@@ -209,14 +270,12 @@ async def send_zameni(call: CallbackQuery):
     pdf_path = f"temp_{filename}"
 
     try:
-        # Проверяем кэш
         now = time.time()
         cached = pdf_cache.get(filename)
         if cached and (now - cached[1]) < CACHE_TTL:
             data = cached[0]
             print(f"[cache] Используем кэш для {filename}")
         else:
-            # Скачиваем и парсим
             if not os.path.exists(pdf_path):
                 ok = download_pdf_by_name(filename, pdf_path)
                 if not ok:
@@ -234,7 +293,6 @@ async def send_zameni(call: CallbackQuery):
 
         zameni = data.get(group, [])
         
-        # Если для группы нет данных — отправляем оригинал PDF
         if not zameni:
             if not os.path.exists(pdf_path):
                 download_pdf_by_name(filename, pdf_path)
@@ -312,8 +370,8 @@ async def bug_report(call: CallbackQuery):
                 pass
 
 async def main():
-    # Запускаем веб-сервер параллельно с ботом
-    await start_web_server()
+    init_db()  # Инициализация БД
+    await start_web_server()  # Запуск веб-сервера
     print("Бот запущен...")
     await dp.start_polling(bot)
 
