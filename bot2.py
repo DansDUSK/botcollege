@@ -17,84 +17,100 @@ from keyboards import (
 )
 from gdrive import download_pdf_by_name, list_files_in_folder, GDRIVE_FOLDER_ID
 from parser import parse_pdf, format_zameni, format_legend
-from database import (
-    init_db, add_user, get_users_for_notification, get_last_notified, set_last_notified
-)
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Кэш для PDF
+# Кэш
 pdf_cache: dict[str, tuple[dict, float]] = {}
-CACHE_TTL = 3 * 60 * 60  # 3 часа
+CACHE_TTL = 3 * 60 * 60
 
 dp.callback_query.middleware(CallbackAnswerMiddleware())
-
 last_bug_msg: dict[int, int] = {}
 
-# --- Проверка уведомлений ---
+# --- ФАЙЛЫ ДЛЯ УВЕДОМЛЕНИЙ ---
+USERS_FILE = "users.txt"
+SENT_FILE = "sent.txt"
+
+def get_users() -> list[int]:
+    if not os.path.exists(USERS_FILE):
+        return []
+    with open(USERS_FILE, "r") as f:
+        return [int(line.strip()) for line in f if line.strip()]
+
+def add_user_to_file(user_id: int):
+    users = get_users()
+    if user_id not in users:
+        with open(USERS_FILE, "a") as f:
+            f.write(f"{user_id}\n")
+
+def get_sent_users() -> list[int]:
+    if not os.path.exists(SENT_FILE):
+        return []
+    with open(SENT_FILE, "r") as f:
+        return [int(line.strip()) for line in f if line.strip()]
+
+def add_sent_user(user_id: int):
+    with open(SENT_FILE, "a") as f:
+        f.write(f"{user_id}\n")
+
+def clear_sent_file():
+    if os.path.exists(SENT_FILE):
+        os.remove(SENT_FILE)
+
+# --- УВЕДОМЛЕНИЯ ---
 async def check_and_notify():
-    """Проверяет новые файлы на Google Drive и рассылает уведомления."""
     try:
         files = list_files_in_folder(GDRIVE_FOLDER_ID)
         if not files:
-            print("[notify] Список файлов пуст")
             return
 
         tomorrow = (datetime.now() + timedelta(days=1)).strftime("%d.%m.%Y") + ".pdf"
-        print(f"[notify] Ищем файл: {tomorrow}")
-
         found = any(f.get("path") == tomorrow for f in files)
-        if not found:
-            print(f"[notify] Файл {tomorrow} ещё не выложен")
-            return
-
-        users = get_users_for_notification()
-        print(f"[notify] Файл найден! Рассылаем {len(users)} пользователям")
-
-        for user_id in users:
-            last = get_last_notified(user_id)
-            if last != tomorrow:
-                try:
-                    await bot.send_message(
-                        user_id,
-                        f"🔔 *Новые замены!*\n\n"
-                        f"На завтра ({tomorrow}) выложили замены.\n"
-                        f"Загляни в бота, чтобы посмотреть.",
-                        parse_mode="Markdown"
-                    )
-                    set_last_notified(user_id, tomorrow)
-                    print(f"[notify] Отправлено {user_id}")
-                except Exception as e:
-                    print(f"[notify] Ошибка для {user_id}: {e}")
+        
+        if found:
+            users = get_users()
+            sent = get_sent_users()
+            
+            for user_id in users:
+                if user_id not in sent:
+                    try:
+                        await bot.send_message(
+                            user_id,
+                            f"🔔 *Новые замены!*\n\n"
+                            f"На завтра ({tomorrow}) выложили замены.\n"
+                            f"Загляни в бота, чтобы посмотреть.",
+                            parse_mode="Markdown"
+                        )
+                        add_sent_user(user_id)
+                        print(f"[notify] Отправлено {user_id}")
+                    except Exception as e:
+                        print(f"[notify] Ошибка для {user_id}: {e}")
+        else:
+            # Если файла нет (например, новый день), очищаем sent.txt
+            clear_sent_file()
+            
     except Exception as e:
         print(f"[notify] Ошибка проверки: {e}")
 
-# --- Веб-сервер для Render ---
+# --- ВЕБ-СЕРВЕР ДЛЯ RENDER ---
 async def handle_health(request):
-    """Эндпоинт для cron-job.org."""
-    asyncio.create_task(check_and_notify())  # Запускаем проверку в фоне
+    asyncio.create_task(check_and_notify())
     return web.Response(text="OK")
-
-async def handle_root(request):
-    return web.Response(text="Бот замен активен и работает!")
 
 async def start_web_server():
     app = web.Application()
     app.router.add_get("/health", handle_health)
-    app.router.add_get("/", handle_root)
     runner = web.AppRunner(app)
     await runner.setup()
-    
     port = int(os.getenv("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"[Render] Веб-сервер запущен на порту {port}")
+    print(f"[Render] Сервер запущен на порту {port}")
 
-# --- Хендлеры ---
-
+# --- ХЕНДЛЕРЫ ---
 async def delete_previous_bug(call: CallbackQuery) -> None:
     user_id = call.from_user.id
     msg_id = last_bug_msg.pop(user_id, None)
@@ -105,9 +121,8 @@ async def delete_previous_bug(call: CallbackQuery) -> None:
             chat_id=call.message.chat.id,
             message_id=msg_id
         )
-        print(f"[bug] удалили сообщение {msg_id} для {user_id}")
-    except Exception as e:
-        print(f"[bug] не удалось удалить {msg_id}: {e}")
+    except Exception:
+        pass
 
 def get_filename_and_labels(day: str) -> tuple[str, str, str]:
     offset = 0 if day == "today" else 1
@@ -119,7 +134,7 @@ def get_filename_and_labels(day: str) -> tuple[str, str, str]:
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
-    add_user(message.from_user.id)  # Регистрируем пользователя
+    add_user_to_file(message.from_user.id)
     await message.answer(
         "👋 Привет! \nЯ твой бот для просмотра замен🚀\nВыбери, что тебе нужно:",
         reply_markup=main_menu()
@@ -146,13 +161,6 @@ async def about_me(call: CallbackQuery):
         parse_mode="Markdown",
         reply_markup=back_keybord()
     )
-
-@dp.callback_query(F.data == "menu:notifications")
-async def toggle_notif(call: CallbackQuery):
-    from database import toggle_notifications
-    new_state = toggle_notifications(call.from_user.id)
-    status = "включены" if new_state else "выключены"
-    await call.answer(f"Уведомления {status}", show_alert=True)
 
 @dp.callback_query(F.data == "menu:zameni")
 async def menu_zameni(call: CallbackQuery):
@@ -370,8 +378,7 @@ async def bug_report(call: CallbackQuery):
                 pass
 
 async def main():
-    init_db()  # Инициализация БД
-    await start_web_server()  # Запуск веб-сервера
+    await start_web_server()
     print("Бот запущен...")
     await dp.start_polling(bot)
 
