@@ -22,11 +22,8 @@ logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-
-# Кэш
 pdf_cache: dict[str, tuple[dict, float]] = {}
 CACHE_TTL = 3 * 60 * 60
-
 dp.callback_query.middleware(CallbackAnswerMiddleware())
 last_bug_msg: dict[int, int] = {}
 
@@ -40,7 +37,7 @@ def get_users() -> list[int]:
     with open(USERS_FILE, "r") as f:
         return [int(line.strip()) for line in f if line.strip()]
 
-def add_user_to_file(user_id: int):
+def add_user(user_id: int):
     users = get_users()
     if user_id not in users:
         with open(USERS_FILE, "a") as f:
@@ -89,13 +86,13 @@ async def check_and_notify():
                     except Exception as e:
                         print(f"[notify] Ошибка для {user_id}: {e}")
         else:
-            # Если файла нет (например, новый день), очищаем sent.txt
+            # Если файла нет (новый день), очищаем sent.txt
             clear_sent_file()
             
     except Exception as e:
         print(f"[notify] Ошибка проверки: {e}")
 
-# --- ВЕБ-СЕРВЕР ДЛЯ RENDER ---
+# --- ВЕБ-СЕРВЕР ---
 async def handle_health(request):
     asyncio.create_task(check_and_notify())
     return web.Response(text="OK")
@@ -134,7 +131,7 @@ def get_filename_and_labels(day: str) -> tuple[str, str, str]:
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
-    add_user_to_file(message.from_user.id)
+    add_user(message.from_user.id)
     await message.answer(
         "👋 Привет! \nЯ твой бот для просмотра замен🚀\nВыбери, что тебе нужно:",
         reply_markup=main_menu()
@@ -153,10 +150,10 @@ async def about_me(call: CallbackQuery):
     await delete_previous_bug(call)
     await call.message.edit_text(
         "*Бот создан в учебных целях*, для облегчения просмотра замен 😋\n"
-        "На данный момент бот все также разрабатывается (убираются ошибки с распознованием замен) - *спасибо за понимание!*\n"
+        "На данный момент бот все также разрабатывается - *спасибо за понимание!*\n"
         "Разработчик💻: \n*Скрыт*\n"
         "Тестировщики📱:\n@nelokhe\n@desoolatee\n\n"
-        "🔗 Исходный код есть на GitHub: [Тык](https://github.com/DansDUSK/botcollege)\n\n"
+        "🔗 Исходный код: [Тык](https://github.com/DansDUSK/botcollege)\n\n"
         "*Все права защищены.*",
         parse_mode="Markdown",
         reply_markup=back_keybord()
@@ -282,7 +279,6 @@ async def send_zameni(call: CallbackQuery):
         cached = pdf_cache.get(filename)
         if cached and (now - cached[1]) < CACHE_TTL:
             data = cached[0]
-            print(f"[cache] Используем кэш для {filename}")
         else:
             if not os.path.exists(pdf_path):
                 ok = download_pdf_by_name(filename, pdf_path)
@@ -297,7 +293,6 @@ async def send_zameni(call: CallbackQuery):
 
             data = parse_pdf(pdf_path)
             pdf_cache[filename] = (data, now)
-            print(f"[cache] Обновили кэш для {filename}")
 
         zameni = data.get(group, [])
         
@@ -309,7 +304,7 @@ async def send_zameni(call: CallbackQuery):
                 f"😊 На завтра замен у группы *{group}* нету.\n",
                 parse_mode="Markdown", reply_markup=back_keybord()
             )
-            await call.message.answer("Если заметили ошибки или недостающие данные, ниже оригинальный файл замен! (Возможны ошибки в автоматическом распозновании)\n")
+            await call.message.answer("Если заметили ошибки или недостающие данные, ниже оригинальный файл замен!\n")
             await call.message.answer_document(doc)
             return
         
