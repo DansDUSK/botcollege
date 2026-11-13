@@ -3,3 +3,6 @@ requests
 pdfplumber
 gdown
 aiohttp
+camelot-py[cv]
+ghostscript
+opencv-python-headlass
