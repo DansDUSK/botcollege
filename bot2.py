@@ -124,8 +124,15 @@ async def delete_previous_bug(call: CallbackQuery) -> None:
 def get_filename_and_labels(day: str) -> tuple[str, str, str]:
     offset = 0 if day == "today" else 1
     target = datetime.now() + timedelta(days=offset)
+
+    # Если это "Завтра" и оно выпадает на воскресенье (6 = воскресенье в Python)
+    if day == "tomorrow" and target.weekday() == 6:
+        target += timedelta(days=1)  # Переносим на понедельник
+        day_label = "Завтра (понедельник)" # Чтобы пользователь понял
+    else:
+        day_label = "Сегодня" if day == "today" else "Завтра"
+
     filename = target.strftime("%d.%m.%Y") + ".pdf"
-    day_label = "Сегодня" if day == "today" else "Завтра"
     date_label = target.strftime("%d.%m.%Y")
     return filename, day_label, date_label
 
