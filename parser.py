@@ -1,4 +1,5 @@
 import camelot
+import pdfplumber
 import re
 from collections import defaultdict
 
@@ -7,9 +8,12 @@ GROUP_NUM_RE = re.compile(r"(\d{3,4})")
 LESSON_NUM_RE = re.compile(r"^\s*(\d{1,2})\s*$")
 CANCELLED_RE = re.compile(r"[Уу]рок\s+снят", re.IGNORECASE)
 GALOCHKA_RE = re.compile(r"^[√✓vV]+$")
-
-# Регулярка для поиска учителей (Фамилия И.О. или Фамилия И.О.И.О.)
 TEACHER_RE = re.compile(r"([А-ЯЁ][а-яё\-]+)\s+([А-ЯЁ]\.\s?[А-ЯЁ]?\.?)")
+
+# Легенда (кабинеты)
+LEGEND_RE = re.compile(
+    r"([А-ЯЁ][а-яё\-]+\s+[А-ЯЁ]\.\s?[А-ЯЁ]?\.?\s*)?\d{2,3}[А-Я]?\s*\([\d,\-\s]+\)"
+)
 
 def _clean(s: str) -> str:
     if not s: return ""
@@ -19,33 +23,45 @@ def _clean(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip(" .")
 
 def _extract_teachers(raw_text: str) -> str:
-    """Ищет всех учителей в тексте ячейки и возвращает их через запятую."""
     if not raw_text:
         return ""
-    
-    # Заменяем \n на пробел, чтобы учителя не слипались
     text = raw_text.replace("\n", " ")
-    
-    # Ищем всех подходящих под паттерн
     matches = TEACHER_RE.findall(text)
-    
     teachers = []
     for surname, initials in matches:
-        # Склеиваем "Фамилия И.О."
         t = f"{surname} {initials.replace(' ', '')}"
         if t not in teachers:
             teachers.append(t)
-            
     return ", ".join(teachers)
+
+def _parse_legend(pdf_path: str) -> list[str]:
+    """Достает легенду кабинетов из PDF через pdfplumber."""
+    legend = []
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if not text:
+                    continue
+                for line in text.split("\n"):
+                    if LEGEND_RE.search(line):
+                        # Чистим от рамок и лишнего
+                        clean_line = _clean(line)
+                        if clean_line and clean_line not in legend:
+                            legend.append(clean_line)
+    except Exception as e:
+        print(f"❌ Ошибка парсинга легенды: {e}")
+    return legend
 
 def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
     result = defaultdict(list)
     
+    # 1. Парсим группы через camelot
     try:
         tables = camelot.read_pdf(pdf_path, pages="all", flavor="lattice")
     except Exception as e:
         print(f"❌ Ошибка camelot: {e}")
-        return {}
+        return {"__legend__": []}
 
     current_group = None
 
@@ -87,7 +103,6 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
 
                 lesson_num = int(lesson_cell)
                 
-                # Берем СЫРЫЕ ячейки (без _clean), чтобы не потерять переносы
                 new_subj_raw = parts[2] if len(parts) > 2 else ""
                 new_teacher_raw = parts[4] if len(parts) > 4 else ""
                 old_subj_raw = parts[5] if len(parts) > 5 else ""
@@ -96,7 +111,6 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
                 new_subj = _clean(new_subj_raw)
                 old_subj = _clean(old_subj_raw)
                 
-                # Достаем учителей через регулярку
                 new_teacher = _extract_teachers(new_teacher_raw)
                 old_teacher = _extract_teachers(old_teacher_raw)
 
@@ -117,6 +131,9 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
                 if current_group not in result:
                     result[current_group] = []
                 result[current_group].append(current_lesson)
+
+    # 2. Парсим легенду через pdfplumber
+    result["__legend__"] = _parse_legend(pdf_path)
 
     return dict(result)
 
