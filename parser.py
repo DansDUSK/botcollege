@@ -8,12 +8,35 @@ LESSON_NUM_RE = re.compile(r"^\s*(\d{1,2})\s*$")
 CANCELLED_RE = re.compile(r"[Уу]рок\s+снят", re.IGNORECASE)
 GALOCHKA_RE = re.compile(r"^[√✓vV]+$")
 
+# Регулярка для поиска учителей (Фамилия И.О. или Фамилия И.О.И.О.)
+TEACHER_RE = re.compile(r"([А-ЯЁ][а-яё\-]+)\s+([А-ЯЁ]\.\s?[А-ЯЁ]?\.?)")
+
 def _clean(s: str) -> str:
     if not s: return ""
     s = s.replace("│", "").replace("┼", "").replace("─", "").replace("┤", "")
     s = s.replace("┌", "").replace("┐", "").replace("└", "").replace("┘", "")
     s = s.replace("\n", " ")
     return re.sub(r"\s+", " ", s).strip(" .")
+
+def _extract_teachers(raw_text: str) -> str:
+    """Ищет всех учителей в тексте ячейки и возвращает их через запятую."""
+    if not raw_text:
+        return ""
+    
+    # Заменяем \n на пробел, чтобы учителя не слипались
+    text = raw_text.replace("\n", " ")
+    
+    # Ищем всех подходящих под паттерн
+    matches = TEACHER_RE.findall(text)
+    
+    teachers = []
+    for surname, initials in matches:
+        # Склеиваем "Фамилия И.О."
+        t = f"{surname} {initials.replace(' ', '')}"
+        if t not in teachers:
+            teachers.append(t)
+            
+    return ", ".join(teachers)
 
 def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
     result = defaultdict(list)
@@ -64,12 +87,21 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
 
                 lesson_num = int(lesson_cell)
                 
-                new_subj = cells[2] if len(cells) > 2 else ""
-                new_teacher = cells[4] if len(cells) > 4 else ""
-                old_subj = cells[5] if len(cells) > 5 else ""
-                old_teacher = cells[7] if len(cells) > 7 else ""
+                # Берем СЫРЫЕ ячейки (без _clean), чтобы не потерять переносы
+                new_subj_raw = parts[2] if len(parts) > 2 else ""
+                new_teacher_raw = parts[4] if len(parts) > 4 else ""
+                old_subj_raw = parts[5] if len(parts) > 5 else ""
+                old_teacher_raw = parts[7] if len(parts) > 7 else ""
+
+                new_subj = _clean(new_subj_raw)
+                old_subj = _clean(old_subj_raw)
+                
+                # Достаем учителей через регулярку
+                new_teacher = _extract_teachers(new_teacher_raw)
+                old_teacher = _extract_teachers(old_teacher_raw)
 
                 is_cancelled = bool(CANCELLED_RE.search(new_subj))
+                
                 if GALOCHKA_RE.match(new_subj): new_subj = ""
                 if GALOCHKA_RE.match(old_subj): old_subj = ""
 
@@ -88,7 +120,6 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
 
     return dict(result)
 
-# --- ФУНКЦИИ ДЛЯ БОТА (оставь как были) ---
 def format_zameni(group: str, zameni: list[dict], day_label: str, date_label: str) -> str:
     if not zameni:
         return (
@@ -105,8 +136,8 @@ def format_zameni(group: str, zameni: list[dict], day_label: str, date_label: st
 
         if z.get("cancelled"):
             old = ""
-            if z.get("old_subject"):
-                old = f"\n   _был: {z['old_subject']}"
+            if z.get("old_subject") or z.get("old_teacher"):
+                old = f"\n   _был: {z.get('old_subject', '—')}"
                 if z.get("old_teacher"):
                     old += f" — {z['old_teacher']}"
                 old += "_"
@@ -120,8 +151,8 @@ def format_zameni(group: str, zameni: list[dict], day_label: str, date_label: st
             new_line += f" — {z['new_teacher']}"
         block.append(new_line)
 
-        if z.get("old_subject"):
-            old_line = f"❌ _вместо_ {z['old_subject']}"
+        if z.get("old_subject") or z.get("old_teacher"):
+            old_line = f"❌ _вместо_ {z.get('old_subject', '—')}"
             if z.get("old_teacher"):
                 old_line += f" — {z['old_teacher']}"
             block.append(old_line)
@@ -130,7 +161,6 @@ def format_zameni(group: str, zameni: list[dict], day_label: str, date_label: st
         lines.append("")
 
     return "\n".join(lines)
-
 
 def format_legend(legend: list[str]) -> str:
     if not legend:
