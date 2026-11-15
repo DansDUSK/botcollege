@@ -235,5 +235,3 @@ def format_legend(legend: list[str]) -> str:
     for item in legend:
         lines.append(f"• {item}")
     return "\n".join(lines)
-        lines.append(f"• {item}")
-    return "\n".join(lines)
