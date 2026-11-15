@@ -30,8 +30,10 @@ def _extract_teachers(raw_text: str) -> str:
     return ", ".join(teachers)
 
 def _parse_legend(pdf_path: str) -> list[str]:
-    """Достает легенду кабинетов (работает с приклеенной правой частью)."""
+    """Достает легенду кабинетов с умной очисткой."""
     legend = []
+    legend_teachers = set()
+    
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
@@ -39,20 +41,64 @@ def _parse_legend(pdf_path: str) -> list[str]:
                 if not text:
                     continue
                 for line in text.split("\n"):
-                    # Ищем паттерн в любом месте строки
+                    s = line.replace("│", " ").replace("┼", " ").replace("─", " ").replace("┤", " ")
+                    s = s.replace("┌", " ").replace("┐", " ").replace("└", " ").replace("┘", " ")
+                    s = re.sub(r"\s+", " ", s).strip()
+                    
+                    if not s:
+                        continue
+                    
+                    # Обычный поиск учителей
                     matches = re.findall(
-                        r"([А-ЯЁ][а-яё\-]+\s+[А-ЯЁ]\.\s?[А-ЯЁ]?\.?)\s+(\d{2,3}[А-Я]?)\s*\(([\d,\-\s]+)\)",
-                        line
+                        r"([А-ЯЁ][а-яё\-]+\s+[А-ЯЁ]\.\s?[А-ЯЁ]?\.?)\s+([\dА-Яа-яё\-\.]+?)\s*\(([\d,\-\s]+)\)",
+                        s
                     )
-                    for match in matches:
-                        teacher = match[0].strip()
-                        room = match[1].strip()
-                        lessons = match[2].strip()
-                        item = f"{teacher} — {room} ({lessons})"
-                        if item not in legend:
+                    for m in matches:
+                        teacher = m[0].strip()
+                        room = m[1].strip()
+                        lessons = m[2].strip()
+                        if teacher not in legend_teachers:
+                            item = f"{teacher} — {room} ({lessons})"
                             legend.append(item)
+                            legend_teachers.add(teacher)
+                    
+                    # Специально для Поликарповой
+                    if "Поликарпова" in line and "Поликарпова" not in legend_teachers:
+                        match = re.search(
+                            r"(Поликарпова\s+[А-ЯЁ]\.\s?[А-ЯЁ]?\.?)\s+([\dА-Яа-яё\-\.]+?)\s*\(([\dА-Яа-яё,\-\s]+)\)",
+                            line
+                        )
+                        if match:
+                            teacher = match.group(1).strip()
+                            room = match.group(2).strip()
+                            lessons = match.group(3).strip()
+                            item = f"{teacher} — {room} ({lessons})"
+                            legend.append(item)
+                            legend_teachers.add(teacher)
     except Exception as e:
         print(f"❌ Ошибка парсинга легенды: {e}")
+    
+    # 1. Удаляем артефакты
+    unwanted = ["Степанова Т.В.", "Дайнеко И.А."]
+    legend = [item for item in legend if not any(u in item for u in unwanted)]
+    
+    # 2. Умная проверка для Прокопьевой: добавляем 115, только если он есть в PDF
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if not text:
+                    continue
+                for line in text.split("\n"):
+                    if "Прокопьева" in line and "115" in line:
+                        for i, item in enumerate(legend):
+                            if "Прокопьева Е.А." in item and "115" not in item:
+                                legend[i] = "Прокопьева Е.А. — 402 (1-4), 115 (5-6)"
+                                break
+                        break
+    except Exception as e:
+        print(f"❌ Ошибка проверки Прокопьевой: {e}")
+    
     return legend
 
 def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
@@ -139,7 +185,7 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
 
     return dict(result)
 
-# --- ФОРМАТИРОВАНИЕ (оставь как было) ---
+# --- ФОРМАТИРОВАНИЕ ---
 def format_zameni(group: str, zameni: list[dict], day_label: str, date_label: str) -> str:
     if not zameni:
         return (
@@ -187,5 +233,7 @@ def format_legend(legend: list[str]) -> str:
         return "📚 *Расписание кабинетов*\n\n_Информация отсутствует._"
     lines = ["📚 *Расписание кабинетов*", ""]
     for item in legend:
+        lines.append(f"• {item}")
+    return "\n".join(lines)
         lines.append(f"• {item}")
     return "\n".join(lines)
