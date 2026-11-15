@@ -10,12 +10,6 @@ CANCELLED_RE = re.compile(r"[Уу]рок\s+снят", re.IGNORECASE)
 GALOCHKA_RE = re.compile(r"^[√✓vV]+$")
 TEACHER_RE = re.compile(r"([А-ЯЁ][а-яё\-]+)\s+([А-ЯЁ]\.\s?[А-ЯЁ]?\.?)")
 
-# СТРОГАЯ регулярка для легенды: Фамилия И.О. + аудитория + (уроки)
-# Пример: "Горбова Г.И. 402 (1-6)" или "Прокопьева Е.А. 302 (1-3,5-6)"
-LEGEND_STRICT_RE = re.compile(
-    r"^([А-ЯЁ][а-яё\-]+\s+[А-ЯЁ]\.\s?[А-ЯЁ]?\.?)\s+(\d{2,3}[А-Я]?)\s*\(([\d,\-\s]+)\)$"
-)
-
 def _clean(s: str) -> str:
     if not s: return ""
     s = s.replace("│", "").replace("┼", "").replace("─", "").replace("┤", "")
@@ -36,7 +30,7 @@ def _extract_teachers(raw_text: str) -> str:
     return ", ".join(teachers)
 
 def _parse_legend(pdf_path: str) -> list[str]:
-    """Достает ТОЛЬКО легенду кабинетов (Фамилия И.О. + Аудитория + Уроки)."""
+    """Достает легенду кабинетов (работает с приклеенной правой частью)."""
     legend = []
     try:
         with pdfplumber.open(pdf_path) as pdf:
@@ -45,20 +39,18 @@ def _parse_legend(pdf_path: str) -> list[str]:
                 if not text:
                     continue
                 for line in text.split("\n"):
-                    # Ищем только строки, которые полностью совпадают с паттерном легенды
-                    # (игнорируем всё, что похоже на расписание)
-                    if "Урок снят" in line or "│" in line or "предмет" in line.lower():
-                        continue
-                    
-                    # Пробуем найти строгий паттерн
-                    match = LEGEND_STRICT_RE.search(line.strip())
-                    if match:
-                        teacher = match.group(1).strip()
-                        room = match.group(2).strip()
-                        lessons = match.group(3).strip()
-                        legend_item = f"{teacher} — {room} ({lessons})"
-                        if legend_item not in legend:
-                            legend.append(legend_item)
+                    # Ищем паттерн в любом месте строки
+                    matches = re.findall(
+                        r"([А-ЯЁ][а-яё\-]+\s+[А-ЯЁ]\.\s?[А-ЯЁ]?\.?)\s+(\d{2,3}[А-Я]?)\s*\(([\d,\-\s]+)\)",
+                        line
+                    )
+                    for match in matches:
+                        teacher = match[0].strip()
+                        room = match[1].strip()
+                        lessons = match[2].strip()
+                        item = f"{teacher} — {room} ({lessons})"
+                        if item not in legend:
+                            legend.append(item)
     except Exception as e:
         print(f"❌ Ошибка парсинга легенды: {e}")
     return legend
