@@ -23,20 +23,13 @@ def _extract_teachers(raw_text: str) -> str:
     if not raw_text:
         return ""
     
-    # Разбиваем по \n, чтобы каждый учитель был отдельно
-    lines = raw_text.split("\n")
+    # Находим всех учителей в тексте (даже если они слиплись)
+    matches = TEACHER_RE.findall(raw_text)
     teachers = []
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        
-        matches = TEACHER_RE.findall(line)
-        for surname, initials in matches:
-            t = f"{surname} {initials.replace(' ', '')}"
-            if t not in teachers:
-                teachers.append(t)
+    for surname, initials in matches:
+        t = f"{surname} {initials.replace(' ', '')}"
+        if t not in teachers:
+            teachers.append(t)
     
     return ", ".join(teachers)
 
@@ -88,11 +81,11 @@ def _parse_legend(pdf_path: str) -> list[str]:
     except Exception as e:
         print(f"❌ Ошибка парсинга легенды: {e}")
     
-    # 1. Удаляем артефакты
+    # Удаляем артефакты
     unwanted = ["Степанова Т.В.", "Дайнеко И.А."]
     legend = [item for item in legend if not any(u in item for u in unwanted)]
     
-    # 2. Умная проверка для Прокопьевой
+    # Умная проверка для Прокопьевой
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
@@ -166,17 +159,18 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
                 old_subj_raw = parts[5] if len(parts) > 5 else ""
                 old_teacher_raw = parts[7] if len(parts) > 7 else ""
 
-                # --- ОБРАБОТКА НЕСКОЛЬКИХ ПРЕДМЕТОВ И УЧИТЕЛЕЙ ---
-                new_subjects = [s.strip() for s in new_subj_raw.split("\n") if s.strip()]
-                new_teachers = [t.strip() for t in new_teacher_raw.split("\n") if t.strip()]
-                old_subjects = [s.strip() for s in old_subj_raw.split("\n") if s.strip()]
-                old_teachers = [t.strip() for t in old_teacher_raw.split("\n") if t.strip()]
-
-                new_teacher = ", ".join([_extract_teachers(t) for t in new_teachers if _extract_teachers(t)])
-                old_teacher = ", ".join([_extract_teachers(t) for t in old_teachers if _extract_teachers(t)])
+                # --- РАЗБИВАЕМ НА НЕСКОЛЬКО ПРЕДМЕТОВ И УЧИТЕЛЕЙ ---
+                # Предметы: разбиваем по заглавным буквам или по \n
+                new_subjects = re.split(r"(?<=[а-яё])\s*(?=[А-ЯЁ])", _clean(new_subj_raw))
+                old_subjects = re.split(r"(?<=[а-яё])\s*(?=[А-ЯЁ])", _clean(old_subj_raw))
                 
-                new_subj = ", ".join([_clean(s) for s in new_subjects if _clean(s)])
-                old_subj = ", ".join([_clean(s) for s in old_subjects if _clean(s)])
+                # Учителя: находим всех через TEACHER_RE
+                new_teacher = _extract_teachers(new_teacher_raw)
+                old_teacher = _extract_teachers(old_teacher_raw)
+
+                # Склеиваем предметы через запятую
+                new_subj = ", ".join([s.strip() for s in new_subjects if s.strip()])
+                old_subj = ", ".join([s.strip() for s in old_subjects if s.strip()])
 
                 is_cancelled = any(CANCELLED_RE.search(s) for s in new_subjects)
                 
