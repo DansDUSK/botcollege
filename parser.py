@@ -159,20 +159,16 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
                 old_subj_raw = parts[5] if len(parts) > 5 else ""
                 old_teacher_raw = parts[7] if len(parts) > 7 else ""
 
-                # --- РАЗБИВАЕМ НА НЕСКОЛЬКО ПРЕДМЕТОВ И УЧИТЕЛЕЙ ---
-                # Предметы: разбиваем по заглавным буквам или по \n
-                new_subjects = re.split(r"(?<=[а-яё])\s*(?=[А-ЯЁ])", _clean(new_subj_raw))
-                old_subjects = re.split(r"(?<=[а-яё])\s*(?=[А-ЯЁ])", _clean(old_subj_raw))
+                # --- НЕ РАЗБИВАЕМ ПРЕДМЕТЫ ПО ЗАГЛАВНЫМ БУКВАМ ---
+                new_subj = _clean(new_subj_raw)
+                old_subj = _clean(old_subj_raw)
                 
                 # Учителя: находим всех через TEACHER_RE
                 new_teacher = _extract_teachers(new_teacher_raw)
                 old_teacher = _extract_teachers(old_teacher_raw)
 
-                # Склеиваем предметы через запятую
-                new_subj = ", ".join([s.strip() for s in new_subjects if s.strip()])
-                old_subj = ", ".join([s.strip() for s in old_subjects if s.strip()])
-
-                is_cancelled = any(CANCELLED_RE.search(s) for s in new_subjects)
+                # Проверяем на "Урок снят" (во всех предметах)
+                is_cancelled = bool(CANCELLED_RE.search(new_subj))
                 
                 if GALOCHKA_RE.match(new_subj): new_subj = ""
                 if GALOCHKA_RE.match(old_subj): old_subj = ""
