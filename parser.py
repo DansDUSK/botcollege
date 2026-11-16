@@ -10,6 +10,7 @@ CANCELLED_RE = re.compile(r"[Уу]рок\s+снят", re.IGNORECASE)
 GALOCHKA_RE = re.compile(r"^[√✓vV]+$")
 TEACHER_RE = re.compile(r"([А-ЯЁ][а-яё\-]+)\s+([А-ЯЁ]\.\s?[А-ЯЁ]?\.?)")
 
+
 def _clean(s: str) -> str:
     if not s: return ""
     s = s.replace("│", "").replace("┼", "").replace("─", "").replace("┤", "")
@@ -17,20 +18,30 @@ def _clean(s: str) -> str:
     s = s.replace("\n", " ")
     return re.sub(r"\s+", " ", s).strip(" .")
 
+
 def _extract_teachers(raw_text: str) -> str:
     if not raw_text:
         return ""
-    text = raw_text.replace("\n", " ")
-    matches = TEACHER_RE.findall(text)
+    
+    # Разбиваем по \n, чтобы каждый учитель был отдельно
+    lines = raw_text.split("\n")
     teachers = []
-    for surname, initials in matches:
-        t = f"{surname} {initials.replace(' ', '')}"
-        if t not in teachers:
-            teachers.append(t)
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        matches = TEACHER_RE.findall(line)
+        for surname, initials in matches:
+            t = f"{surname} {initials.replace(' ', '')}"
+            if t not in teachers:
+                teachers.append(t)
+    
     return ", ".join(teachers)
 
+
 def _parse_legend(pdf_path: str) -> list[str]:
-    """Достает легенду кабинетов с умной очисткой."""
     legend = []
     legend_teachers = set()
     
@@ -40,7 +51,8 @@ def _parse_legend(pdf_path: str) -> list[str]:
                 text = page.extract_text()
                 if not text:
                     continue
-                for line in text.split("\n"):
+                lines = text.split("\n")
+                for line in lines:
                     s = line.replace("│", " ").replace("┼", " ").replace("─", " ").replace("┤", " ")
                     s = s.replace("┌", " ").replace("┐", " ").replace("└", " ").replace("┘", " ")
                     s = re.sub(r"\s+", " ", s).strip()
@@ -48,7 +60,6 @@ def _parse_legend(pdf_path: str) -> list[str]:
                     if not s:
                         continue
                     
-                    # Обычный поиск учителей
                     matches = re.findall(
                         r"([А-ЯЁ][а-яё\-]+\s+[А-ЯЁ]\.\s?[А-ЯЁ]?\.?)\s+([\dА-Яа-яё\-\.]+?)\s*\(([\d,\-\s]+)\)",
                         s
@@ -62,7 +73,6 @@ def _parse_legend(pdf_path: str) -> list[str]:
                             legend.append(item)
                             legend_teachers.add(teacher)
                     
-                    # Специально для Поликарповой
                     if "Поликарпова" in line and "Поликарпова" not in legend_teachers:
                         match = re.search(
                             r"(Поликарпова\s+[А-ЯЁ]\.\s?[А-ЯЁ]?\.?)\s+([\dА-Яа-яё\-\.]+?)\s*\(([\dА-Яа-яё,\-\s]+)\)",
@@ -82,7 +92,7 @@ def _parse_legend(pdf_path: str) -> list[str]:
     unwanted = ["Степанова Т.В.", "Дайнеко И.А."]
     legend = [item for item in legend if not any(u in item for u in unwanted)]
     
-    # 2. Умная проверка для Прокопьевой: добавляем 115, только если он есть в PDF
+    # 2. Умная проверка для Прокопьевой
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
@@ -101,10 +111,10 @@ def _parse_legend(pdf_path: str) -> list[str]:
     
     return legend
 
+
 def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
     result = defaultdict(list)
     
-    # 1. Парсим группы через camelot
     try:
         tables = camelot.read_pdf(pdf_path, pages="all", flavor="lattice")
     except Exception as e:
@@ -156,13 +166,19 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
                 old_subj_raw = parts[5] if len(parts) > 5 else ""
                 old_teacher_raw = parts[7] if len(parts) > 7 else ""
 
-                new_subj = _clean(new_subj_raw)
-                old_subj = _clean(old_subj_raw)
-                
-                new_teacher = _extract_teachers(new_teacher_raw)
-                old_teacher = _extract_teachers(old_teacher_raw)
+                # --- ОБРАБОТКА НЕСКОЛЬКИХ ПРЕДМЕТОВ И УЧИТЕЛЕЙ ---
+                new_subjects = [s.strip() for s in new_subj_raw.split("\n") if s.strip()]
+                new_teachers = [t.strip() for t in new_teacher_raw.split("\n") if t.strip()]
+                old_subjects = [s.strip() for s in old_subj_raw.split("\n") if s.strip()]
+                old_teachers = [t.strip() for t in old_teacher_raw.split("\n") if t.strip()]
 
-                is_cancelled = bool(CANCELLED_RE.search(new_subj))
+                new_teacher = ", ".join([_extract_teachers(t) for t in new_teachers if _extract_teachers(t)])
+                old_teacher = ", ".join([_extract_teachers(t) for t in old_teachers if _extract_teachers(t)])
+                
+                new_subj = ", ".join([_clean(s) for s in new_subjects if _clean(s)])
+                old_subj = ", ".join([_clean(s) for s in old_subjects if _clean(s)])
+
+                is_cancelled = any(CANCELLED_RE.search(s) for s in new_subjects)
                 
                 if GALOCHKA_RE.match(new_subj): new_subj = ""
                 if GALOCHKA_RE.match(old_subj): old_subj = ""
@@ -180,10 +196,10 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
                     result[current_group] = []
                 result[current_group].append(current_lesson)
 
-    # 2. Парсим легенду
     result["__legend__"] = _parse_legend(pdf_path)
 
     return dict(result)
+
 
 # --- ФОРМАТИРОВАНИЕ ---
 def format_zameni(group: str, zameni: list[dict], day_label: str, date_label: str) -> str:
@@ -227,6 +243,7 @@ def format_zameni(group: str, zameni: list[dict], day_label: str, date_label: st
         lines.append("")
 
     return "\n".join(lines)
+
 
 def format_legend(legend: list[str]) -> str:
     if not legend:
