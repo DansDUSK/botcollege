@@ -25,7 +25,10 @@ dp = Dispatcher()
 pdf_cache: dict[str, tuple[dict, float]] = {}
 CACHE_TTL = 3 * 60 * 60
 dp.callback_query.middleware(CallbackAnswerMiddleware())
+
+# Хранилища ID сообщений для удаления
 last_bug_msg: dict[int, int] = {}
+last_pdf_msg: dict[int, int] = {}  # <-- НОВОЕ
 
 # --- ФАЙЛЫ ДЛЯ УВЕДОМЛЕНИЙ ---
 USERS_FILE = "users.txt"
@@ -86,7 +89,6 @@ async def check_and_notify():
                     except Exception as e:
                         print(f"[notify] Ошибка для {user_id}: {e}")
         else:
-            # Если файла нет (новый день), очищаем sent.txt
             clear_sent_file()
             
     except Exception as e:
@@ -107,28 +109,39 @@ async def start_web_server():
     await site.start()
     print(f"[Render] Сервер запущен на порту {port}")
 
-# --- ХЕНДЛЕРЫ ---
+# --- УДАЛЕНИЕ СТАРЫХ СООБЩЕНИЙ ---
 async def delete_previous_bug(call: CallbackQuery) -> None:
     user_id = call.from_user.id
+    
+    # Удаляем сообщение с кнопкой "Нашли ошибку"
     msg_id = last_bug_msg.pop(user_id, None)
-    if msg_id is None:
-        return
-    try:
-        await call.message.bot.delete_message(
-            chat_id=call.message.chat.id,
-            message_id=msg_id
-        )
-    except Exception:
-        pass
+    if msg_id:
+        try:
+            await call.message.bot.delete_message(
+                chat_id=call.message.chat.id,
+                message_id=msg_id
+            )
+        except Exception:
+            pass
+    
+    # Удаляем сообщение с PDF
+    pdf_id = last_pdf_msg.pop(user_id, None)
+    if pdf_id:
+        try:
+            await call.message.bot.delete_message(
+                chat_id=call.message.chat.id,
+                message_id=pdf_id
+            )
+        except Exception:
+            pass
 
 def get_filename_and_labels(day: str) -> tuple[str, str, str]:
     offset = 0 if day == "today" else 1
     target = datetime.now() + timedelta(days=offset)
 
-    # Если это "Завтра" и оно выпадает на воскресенье (6 = воскресенье в Python)
     if day == "tomorrow" and target.weekday() == 6:
-        target += timedelta(days=1)  # Переносим на понедельник
-        day_label = "Завтра (понедельник)" # Чтобы пользователь понял
+        target += timedelta(days=1)
+        day_label = "Завтра (понедельник)"
     else:
         day_label = "Сегодня" if day == "today" else "Завтра"
 
@@ -312,7 +325,10 @@ async def send_zameni(call: CallbackQuery):
                 parse_mode="Markdown", reply_markup=back_keybord()
             )
             await call.message.answer("Если заметили ошибки или недостающие данные, ниже оригинальный файл замен!\n")
-            await call.message.answer_document(doc)
+            
+            # --- СОХРАНЯЕМ ID PDF ---
+            pdf_msg = await call.message.answer_document(doc)
+            last_pdf_msg[call.from_user.id] = pdf_msg.message_id
             return
         
         text = format_zameni(group, zameni, day_label, date_label)
@@ -367,7 +383,9 @@ async def bug_report(call: CallbackQuery):
             caption += f"\nГруппа: {group}"
         caption += "\n\nПроверьте данные по оригиналу."
 
-        await call.message.answer_document(doc, caption=caption)
+        # --- СОХРАНЯЕМ ID PDF ---
+        pdf_msg = await call.message.answer_document(doc, caption=caption)
+        last_pdf_msg[call.from_user.id] = pdf_msg.message_id
 
     except Exception as e:
         logging.exception("Ошибка в bug_report")
