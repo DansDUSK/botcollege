@@ -22,30 +22,25 @@ def _clean(s: str) -> str:
 def _extract_teachers(raw_text: str) -> str:
     if not raw_text:
         return ""
-    
-    # Находим всех учителей в тексте (даже если они слиплись)
     matches = TEACHER_RE.findall(raw_text)
     teachers = []
     for surname, initials in matches:
         t = f"{surname} {initials.replace(' ', '')}"
         if t not in teachers:
             teachers.append(t)
-    
     return ", ".join(teachers)
 
 
 def _parse_legend(pdf_path: str) -> list[str]:
     legend = []
     legend_teachers = set()
-    
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
                 text = page.extract_text()
                 if not text:
                     continue
-                lines = text.split("\n")
-                for line in lines:
+                for line in text.split("\n"):
                     s = line.replace("│", " ").replace("┼", " ").replace("─", " ").replace("┤", " ")
                     s = s.replace("┌", " ").replace("┐", " ").replace("└", " ").replace("┘", " ")
                     s = re.sub(r"\s+", " ", s).strip()
@@ -79,7 +74,7 @@ def _parse_legend(pdf_path: str) -> list[str]:
                             legend.append(item)
                             legend_teachers.add(teacher)
     except Exception as e:
-        print(f"❌ Ошибка парсинга легенды: {e}")
+        print(f"❌ Ошибка легенды: {e}")
     
     # Удаляем артефакты
     unwanted = ["Степанова Т.В.", "Дайнеко И.А."]
@@ -115,6 +110,7 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
         return {"__legend__": []}
 
     current_group = None
+    current_lesson = None
 
     for table in tables:
         df = table.df
@@ -123,9 +119,7 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
             if not raw_cell or raw_cell == "nan":
                 continue
 
-            lines = raw_cell.split("\n")
-
-            for line in lines:
+            for line in raw_cell.split("\n"):
                 line = line.strip()
                 if not line or "─" in line or "├" in line:
                     continue
@@ -140,8 +134,7 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
                 if len(cells) < 2:
                     continue
 
-                first_cell = cells[0]
-                gm = GROUP_NUM_RE.search(first_cell)
+                gm = GROUP_NUM_RE.search(cells[0])
                 if gm:
                     current_group = gm.group(1)
                 
@@ -149,45 +142,57 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
                     continue
 
                 lesson_cell = cells[1] if len(cells) > 1 else ""
-                if not LESSON_NUM_RE.match(lesson_cell):
-                    continue
-
-                lesson_num = int(lesson_cell)
+                is_new_lesson = bool(LESSON_NUM_RE.match(lesson_cell))
                 
-                new_subj_raw = parts[2] if len(parts) > 2 else ""
-                new_teacher_raw = parts[4] if len(parts) > 4 else ""
-                old_subj_raw = parts[5] if len(parts) > 5 else ""
-                old_teacher_raw = parts[7] if len(parts) > 7 else ""
-
-                # --- НЕ РАЗБИВАЕМ ПРЕДМЕТЫ ПО ЗАГЛАВНЫМ БУКВАМ ---
-                new_subj = _clean(new_subj_raw)
-                old_subj = _clean(old_subj_raw)
+                if is_new_lesson:
+                    lesson_num = int(lesson_cell)
+                    current_lesson = {
+                        "lesson": lesson_num,
+                        "new_subject": "",
+                        "new_teacher": "",
+                        "old_subject": "",
+                        "old_teacher": "",
+                        "cancelled": False,
+                    }
+                    result[current_group].append(current_lesson)
+                else:
+                    if current_lesson is None:
+                        continue
                 
-                # Учителя: находим всех через TEACHER_RE
-                new_teacher = _extract_teachers(new_teacher_raw)
-                old_teacher = _extract_teachers(old_teacher_raw)
+                new_subj = _clean(parts[2]) if len(parts) > 2 else ""
+                new_teach = _extract_teachers(parts[4]) if len(parts) > 4 else ""
+                old_subj = _clean(parts[5]) if len(parts) > 5 else ""
+                old_teach = _extract_teachers(parts[7]) if len(parts) > 7 else ""
 
-                # Проверяем на "Урок снят" (во всех предметах)
-                is_cancelled = bool(CANCELLED_RE.search(new_subj))
-                
-                if GALOCHKA_RE.match(new_subj): new_subj = ""
-                if GALOCHKA_RE.match(old_subj): old_subj = ""
+                if not is_new_lesson:
+                    if new_subj and new_subj not in current_lesson["new_subject"]:
+                        current_lesson["new_subject"] = (current_lesson["new_subject"] + ", " + new_subj).strip(", ")
+                    if new_teach and new_teach not in current_lesson["new_teacher"]:
+                        current_lesson["new_teacher"] = (current_lesson["new_teacher"] + ", " + new_teach).strip(", ")
+                    if old_subj and old_subj not in current_lesson["old_subject"]:
+                        current_lesson["old_subject"] = (current_lesson["old_subject"] + ", " + old_subj).strip(", ")
+                    if old_teach and old_teach not in current_lesson["old_teacher"]:
+                        current_lesson["old_teacher"] = (current_lesson["old_teacher"] + ", " + old_teach).strip(", ")
+                else:
+                    current_lesson["new_subject"] = new_subj
+                    current_lesson["new_teacher"] = new_teach
+                    current_lesson["old_subject"] = old_subj
+                    current_lesson["old_teacher"] = old_teach
 
-                current_lesson = {
-                    "lesson": lesson_num,
-                    "new_subject": "" if is_cancelled else new_subj,
-                    "new_teacher": "" if is_cancelled else new_teacher,
-                    "old_subject": old_subj,
-                    "old_teacher": old_teacher,
-                    "cancelled": is_cancelled,
-                }
-                
-                if current_group not in result:
-                    result[current_group] = []
-                result[current_group].append(current_lesson)
+                if CANCELLED_RE.search(new_subj):
+                    current_lesson["cancelled"] = True
+
+    # Чистим галочки (даже если они внутри строки)
+    for group in result:
+        for l in result[group]:
+            l["new_subject"] = re.sub(r"\s*[√✓vV]\s*", "", l["new_subject"]).strip(", ")
+            l["old_subject"] = re.sub(r"\s*[√✓vV]\s*", "", l["old_subject"]).strip(", ")
+            
+            if l["cancelled"]:
+                l["new_subject"] = ""
+                l["new_teacher"] = ""
 
     result["__legend__"] = _parse_legend(pdf_path)
-
     return dict(result)
 
 
@@ -239,6 +244,9 @@ def format_legend(legend: list[str]) -> str:
     if not legend:
         return "📚 *Расписание кабинетов*\n\n_Информация отсутствует._"
     lines = ["📚 *Расписание кабинетов*", ""]
+    for item in legend:
+        lines.append(f"• {item}")
+    return "\n".join(lines)
     for item in legend:
         lines.append(f"• {item}")
     return "\n".join(lines)
