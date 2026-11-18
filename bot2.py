@@ -13,7 +13,7 @@ from aiohttp import web
 from config import BOT_TOKEN
 from keyboards import (
     main_menu, courses_keyboard, groups_keyboard, days_keyboard, back_keybord,
-    bug_report_keyboard, bug_report_keyboard_no_group, cabinets_days_keyboard,
+    bug_report_keyboard, bug_report_keyboard_no_group, cabinets_days_keyboard, back_keyboard_pdf,
 )
 from gdrive import download_pdf_by_name, list_files_in_folder, GDRIVE_FOLDER_ID
 from parser import parse_pdf, format_zameni, format_legend
@@ -376,7 +376,7 @@ async def bug_report(call: CallbackQuery):
         pdf_msg = await call.message.answer_document(
             doc,
             caption=caption,
-            reply_markup=back_keybord() 
+            reply_markup=back_keybord_pdf() 
         )
         last_pdf_msg[call.from_user.id] = pdf_msg.message_id
 
@@ -389,7 +389,18 @@ async def bug_report(call: CallbackQuery):
                 os.remove(pdf_path)
             except Exception:
                 pass
-
+@dp.callback_query(F.data == "menu:main_pdf")
+async def back_main_pdf(call: CallbackQuery):
+    await delete_previous_bug(call)
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+    await call.message.answer(
+        "🎇 Главное меню:",
+        reply_markup=main_menu()
+    )
+    
 async def main():
     await start_web_server()
     print("Бот запущен...")
