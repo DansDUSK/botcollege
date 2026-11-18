@@ -3,7 +3,6 @@ import pdfplumber
 import re
 from collections import defaultdict
 
-# --- РЕГУЛЯРКИ ---
 GROUP_NUM_RE = re.compile(r"(\d{3,4})")
 LESSON_NUM_RE = re.compile(r"^\s*(\d{1,2})\s*$")
 CANCELLED_RE = re.compile(r"[Уу]рок\s+снят", re.IGNORECASE)
@@ -76,11 +75,9 @@ def _parse_legend(pdf_path: str) -> list[str]:
     except Exception as e:
         print(f"❌ Ошибка легенды: {e}")
     
-    # Удаляем артефакты
     unwanted = ["Степанова Т.В.", "Дайнеко И.А."]
     legend = [item for item in legend if not any(u in item for u in unwanted)]
     
-    # Умная проверка для Прокопьевой
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
@@ -182,7 +179,6 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
                 if CANCELLED_RE.search(new_subj):
                     current_lesson["cancelled"] = True
 
-    # Чистим галочки (даже если они внутри строки)
     for group in result:
         for l in result[group]:
             l["new_subject"] = re.sub(r"\s*[√✓vV]\s*", "", l["new_subject"]).strip(", ")
@@ -196,7 +192,6 @@ def parse_pdf(pdf_path: str) -> dict[str, list[dict]]:
     return dict(result)
 
 
-# --- ФОРМАТИРОВАНИЕ ---
 def format_zameni(group: str, zameni: list[dict], day_label: str, date_label: str) -> str:
     if not zameni:
         return (
