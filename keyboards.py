@@ -72,3 +72,8 @@ def bug_report_keyboard_no_group(day: str = "today") -> InlineKeyboardMarkup:
         )],
         [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu:main")],
     ])
+
+def back_keyboard_pdf() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu:main_pdf")]
+    ])
