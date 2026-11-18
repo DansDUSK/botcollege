@@ -26,11 +26,10 @@ pdf_cache: dict[str, tuple[dict, float]] = {}
 CACHE_TTL = 3 * 60 * 60
 dp.callback_query.middleware(CallbackAnswerMiddleware())
 
-# Хранилища ID сообщений для удаления
-last_bug_msg: dict[int, int] = {}
-last_pdf_msg: dict[int, int] = {}  # <-- НОВОЕ
 
-# --- ФАЙЛЫ ДЛЯ УВЕДОМЛЕНИЙ ---
+last_bug_msg: dict[int, int] = {}
+last_pdf_msg: dict[int, int] = {}  
+
 USERS_FILE = "users.txt"
 SENT_FILE = "sent.txt"
 
@@ -60,7 +59,6 @@ def clear_sent_file():
     if os.path.exists(SENT_FILE):
         os.remove(SENT_FILE)
 
-# --- УВЕДОМЛЕНИЯ ---
 async def check_and_notify():
     try:
         files = list_files_in_folder(GDRIVE_FOLDER_ID)
@@ -94,7 +92,6 @@ async def check_and_notify():
     except Exception as e:
         print(f"[notify] Ошибка проверки: {e}")
 
-# --- ВЕБ-СЕРВЕР ---
 async def handle_health(request):
     asyncio.create_task(check_and_notify())
     return web.Response(text="OK")
@@ -109,11 +106,9 @@ async def start_web_server():
     await site.start()
     print(f"[Render] Сервер запущен на порту {port}")
 
-# --- УДАЛЕНИЕ СТАРЫХ СООБЩЕНИЙ ---
 async def delete_previous_bug(call: CallbackQuery) -> None:
     user_id = call.from_user.id
     
-    # Удаляем сообщение с кнопкой "Нашли ошибку"
     msg_id = last_bug_msg.pop(user_id, None)
     if msg_id:
         try:
@@ -124,7 +119,6 @@ async def delete_previous_bug(call: CallbackQuery) -> None:
         except Exception:
             pass
     
-    # Удаляем сообщение с PDF
     pdf_id = last_pdf_msg.pop(user_id, None)
     if pdf_id:
         try:
@@ -320,15 +314,24 @@ async def send_zameni(call: CallbackQuery):
             if not os.path.exists(pdf_path):
                 download_pdf_by_name(filename, pdf_path)
             doc = FSInputFile(pdf_path, filename=filename)
+
             await call.message.edit_text(
                 f"😊 На завтра замен у группы *{group}* нету.\n",
-                parse_mode="Markdown", reply_markup=back_keybord()
+                parse_mode="Markdown",
+                reply_markup=back_keybord()
             )
-            await call.message.answer("Если заметили ошибки или недостающие данные, ниже оригинальный файл замен!\n")
-            
-            # --- СОХРАНЯЕМ ID PDF ---
+
             pdf_msg = await call.message.answer_document(doc)
             last_pdf_msg[call.from_user.id] = pdf_msg.message_id
+
+            bug_msg = await call.message.answer(
+                f"Если заметили ошибку или не хватает данных для группы *{group}* — "
+                f"нажмите кнопку ниже.",
+                parse_mode="Markdown",
+                reply_markup=bug_report_keyboard(group, day)
+            )
+            last_bug_msg[call.from_user.id] = bug_msg.message_id
+            print(f"[bug] сохранили {bug_msg.message_id} для {call.from_user.id}")
             return
         
         text = format_zameni(group, zameni, day_label, date_label)
@@ -383,7 +386,6 @@ async def bug_report(call: CallbackQuery):
             caption += f"\nГруппа: {group}"
         caption += "\n\nПроверьте данные по оригиналу."
 
-        # --- СОХРАНЯЕМ ID PDF ---
         pdf_msg = await call.message.answer_document(doc, caption=caption)
         last_pdf_msg[call.from_user.id] = pdf_msg.message_id
 
