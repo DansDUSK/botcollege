@@ -373,7 +373,11 @@ async def bug_report(call: CallbackQuery):
             caption += f"\nГруппа: {group}"
         caption += "\n\nПроверьте данные по оригиналу."
 
-        pdf_msg = await call.message.answer_document(doc, caption=caption)
+        pdf_msg = await call.message.answer_document(
+            doc,
+            caption=caption,
+            reply_markup=back_keybord() 
+        )
         last_pdf_msg[call.from_user.id] = pdf_msg.message_id
 
     except Exception as e:
