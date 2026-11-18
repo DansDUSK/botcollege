@@ -55,7 +55,6 @@ def cabinets_days_keyboard() -> InlineKeyboardMarkup:
     ])
 
 def bug_report_keyboard(group: str, day: str) -> InlineKeyboardMarkup:
-    """Кнопка 'Нашли ошибку' для экрана замен."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="🐞 Нашли ошибку или недостающие данные?",
@@ -66,7 +65,6 @@ def bug_report_keyboard(group: str, day: str) -> InlineKeyboardMarkup:
 
 
 def bug_report_keyboard_no_group(day: str = "today") -> InlineKeyboardMarkup:
-    """Кнопка 'Нашли ошибку' для раздела Кабинеты."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="🐞 Нашли ошибку или недостающие данные?",
