@@ -311,22 +311,10 @@ async def send_zameni(call: CallbackQuery):
         zameni = data.get(group, [])
         
         if not zameni:
-            if not os.path.exists(pdf_path):
-                download_pdf_by_name(filename, pdf_path)
-            doc = FSInputFile(pdf_path, filename=filename)
-
-            await call.message.edit_text(
-                f"😊 На завтра замен у группы *{group}* нету.\n",
-                parse_mode="Markdown",
-                reply_markup=back_keybord()
-            )
-
-            pdf_msg = await call.message.answer_document(doc)
-            last_pdf_msg[call.from_user.id] = pdf_msg.message_id
-
-            bug_msg = await call.message.answer(
-                f"Если заметили ошибку или не хватает данных для группы *{group}* — "
-                f"нажмите кнопку ниже.",
+            # Если замен нет — показываем ТОЛЬКО кнопку (без PDF)
+            bug_msg = await call.message.edit_text(
+                f"😊 На завтра замен у группы *{group}* нету.\n\n"
+                f"Если заметили ошибку или не хватает данных — нажмите кнопку ниже.",
                 parse_mode="Markdown",
                 reply_markup=bug_report_keyboard(group, day)
             )
@@ -359,7 +347,6 @@ async def send_zameni(call: CallbackQuery):
                 os.remove(pdf_path)
             except Exception:
                 pass
-
 @dp.callback_query(F.data.startswith("bug:"))
 async def bug_report(call: CallbackQuery):
     _, group, day = call.data.split(":")
