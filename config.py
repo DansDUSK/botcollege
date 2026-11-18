@@ -1,6 +1,5 @@
-# ============ НАСТРОЙКИ ============
 import os
-from dotenv import load_dotenv  # Если запускаете локально, подтянет файл .env
+from dotenv import load_dotenv 
 
 load_dotenv()
 
@@ -8,7 +7,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 YADISK_PUBLIC_URL = "https://disk.yandex.by/d/mfUQ5pAX_ScALw"
 
-# ============ ГРУППЫ ============
 GROUPS_BY_COURSE = {
     "1 курс (26)": [
         "126", "226", "326", "426", "526", "626", "726", "826",
