@@ -376,7 +376,7 @@ async def bug_report(call: CallbackQuery):
         pdf_msg = await call.message.answer_document(
             doc,
             caption=caption,
-            reply_markup=back_keybord_pdf() 
+            reply_markup=back_keyboard_pdf() 
         )
         last_pdf_msg[call.from_user.id] = pdf_msg.message_id
 
