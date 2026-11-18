@@ -2,16 +2,10 @@ import gdown
 import os
 import re
 
-
-# ID папки Google Drive (из твоей ссылки)
-# https://drive.google.com/drive/folders/1VHwxwQMbrX7na1srshRRmr-le9iVgs1D
 GDRIVE_FOLDER_ID = "1VHwxwQMbrX7na1srshRRmr-le9iVgs1D"
 
 
 def list_files_in_folder(folder_id: str) -> list[dict]:
-    """
-    Возвращает список файлов в публичной папке Google Drive.
-    """
     try:
         import subprocess
         import json
@@ -32,28 +26,19 @@ def list_files_in_folder(folder_id: str) -> list[dict]:
 
 
 def download_pdf_by_name(filename: str, target_path: str) -> bool:
-    """
-    Скачивает PDF, ищет по началу названия (дате), игнорируя ' (1)', ' (2)'.
-    filename: например, '15.10.2026.pdf'
-    """
     try:
         files = list_files_in_folder(GDRIVE_FOLDER_ID)
         if not files:
             print("[gdrive] Не удалось получить список файлов")
             return False
 
-        # Очищаем имя от .pdf для поиска по началу
         base_name = filename.replace(".pdf", "")
 
-        # Ищем файл, который НАЧИНАЕТСЯ с даты (например, "18.11.2026")
         target_file = None
         for f in files:
             file_name = f.get("path", "")
-            # Убираем путь, если он есть (например, "folder/18.11.2026.pdf")
             if "/" in file_name:
                 file_name = file_name.split("/")[-1]
-            
-            # Проверяем, начинается ли имя с даты
             if file_name.startswith(base_name):
                 target_file = f
                 break
